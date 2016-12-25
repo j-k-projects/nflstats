@@ -1,22 +1,37 @@
+"""
+NOTE: THERE ARE 3 CHOICES YOU CAN MAKE BELOW
+DO NOT MAKE CHANGES TO ANY OTHER LINES UNLESS YOU KNOW WHAT YOU'RE DOING
+    1. THE FILE WHERE OUTPUT IS SAVED (line 21 below)
+    2. THE WEEK YOU WANT DATA FROM (line 26)
+    3. THE SEASON YOU WANT DATA FROM (line 29)
+
+last edit 12/25/2016 Ben B @guga31bb
+"""
+
+#don't change this block
 from __future__ import division
 import nflgame
 from itertools import groupby
 
+#uncomment this to run, but it doesn't work, so good luck with that
 #import nflgame.update_players
 #nflgame.update_players.run()
 
-#change this to be the filepath and name of file you want output. don't delete the quotes
+#1. change this to be the filepath and name of file you want output. don't delete the quotes
 file = 'C:\Users\Ben\Dropbox\SEA\stats\data\gamelogs\success.txt'
 
-#what week of the season do you want? 0 for all weeks
-#if you enter 0 here it takes longer because it's every play in the season
-gameweek = 0
+#2. what week of the season do you want?
+# either pick the specific week to get stats from that week (eg gameweek = 16)
+# or enter 0 to get totals for the entire season (gameweek = 0)
+gameweek = 16
 
+#3. which season do you want? pick a number greater than or equal to 2009
+getyear = 2016
 
 
 if gameweek>0:
-    games = nflgame.games(year=2016, week=gameweek)
-else: games = nflgame.games(year=2016)
+    games = nflgame.games(year=getyear, week=gameweek)
+else: games = nflgame.games(year=getyear)
 
 plays = nflgame.combine_plays(games)
 
