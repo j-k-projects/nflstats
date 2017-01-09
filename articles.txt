@@ -8,3 +8,10 @@ http://12thmanrising.com/2016/12/26/seahawks-establish-run/
 http://12thmanrising.com/2016/12/12/russell-wilson-rams-problem/
 http://12thmanrising.com/2016/12/06/steven-terrells-play-carolina-panthers/
 http://12thmanrising.com/2016/12/02/searching-tyler-lockett/
+
+//How do I create the videos I post on twitter?
+1. Buy bandicam ($40) -- https://www.bandicam.com/
+2. Record screen with bandicam, which saves file on your computer
+3. Upload created file to streamable
+4. Crop on streamable as necessary
+5. Download file from streamable (open video, right click on it, press download) and post to twitter
