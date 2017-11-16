@@ -1,18 +1,10 @@
-//Ben's articles
-
-//QBR replication
-http://www.fieldgulls.com/2016/10/11/13250486/qbr-not-a-russian-conspiracy-against-russell-wilson-but-actually-a
-
-//Seahawks-specific
-http://12thmanrising.com/2017/01/18/who-can-the-seahawks-pursue-to-add-interior-pass-rush/
-http://12thmanrising.com/2016/12/26/seahawks-establish-run/
-http://12thmanrising.com/2016/12/12/russell-wilson-rams-problem/
-http://12thmanrising.com/2016/12/06/steven-terrells-play-carolina-panthers/
-http://12thmanrising.com/2016/12/02/searching-tyler-lockett/
-
 //How do I create the videos I post on twitter?
 1. Buy bandicam ($40) -- https://www.bandicam.com/
-2. Record screen with bandicam, which saves file on your computer
-3. Upload created file to streamable
-4. Crop on streamable as necessary
-5. Download file from streamable (open video, right click on it, press download) and post to twitter
+2. Record screen with bandicam, which saves file on your computer. (in Video --> Format --> Settings, make sure "File Type" is .MP4)
+3. Upload to twitter
+
+//How do I create simple videos?
+1. Windows Movie Maker (FREE)
+
+//How do I create more complicated videos?
+1. Adobe Premiere Elements (~$80)
