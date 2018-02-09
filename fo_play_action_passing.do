@@ -1,8 +1,3 @@
-/* *******************
-** Code for looking at the relationship between rushing and the effectiveness of play action passing
-** Can't run without access to data but can view how variables were defined, data decisions, etc.
-******************* */
-
 clear
 set mem 1g
 
@@ -10,7 +5,7 @@ cd "C:\Users\ben\Dropbox\nfl\fodata\"
 
 //define a list of variables that are relevant for this to keep
 global varlist play_action down togo yards year offydl offense pltype pline offense ///
-defense offydl pressure description week home away gap recept pyd xtranote
+defense offydl pressure description week home away gap recept pyd xtranote null
 
 /*
 //a bunch of boring stuff reading and cleaning each season's data
@@ -36,6 +31,17 @@ insheet using "2016 Charting Combined Pass-Run v3 for Ajit pressure.csv", clear
 	keep $varlist
 	tempfile y6
 	save `y6', replace
+
+	//2017
+insheet using "2017 Pass-Run with PA.csv", clear
+	drop if pa==.
+	tostring pa, replace
+	ren pa play_action
+keep play_action down togo yards year offydl offense pltype pline offense ///
+defense offydl description week home away gap recept pyd xtranote
+	tempfile y7
+	save `y7', replace
+
 	
 //2011
 insheet using "2011 Game Charting Master v2.csv", clear
@@ -44,7 +50,7 @@ insheet using "2011 Game Charting Master v2.csv", clear
 	gen pressure = 1 if passpressure!=""
 	keep $varlist
 	
-	forvalues i = 2/6 {
+	forvalues i = 2/7 {
 	append using `y`i''
 	}
 
@@ -64,7 +70,7 @@ replace shotgun = 1 if shotgun>0 & shotgun!=.
 drop xtranote
 
 //label plays as play action
-gen pa = play_action == "PA" | play_action == "PA/EA"
+gen pa = play_action == "PA" | play_action == "PA/EA" | play_action == "1"
 
 //count scrambles as pass plays since they were intended as such
 replace pltype = "pass" if recept == "scramble"
@@ -72,9 +78,9 @@ keep if pltype=="pass" | pltype == "rushed"
 	gen rush = pltype == "rushed"
 	gen pass = pltype == "pass"
 
-//for success rate, use the basic FO definition of success (40% first down, 60% second down, 100% on remaining downs)
+//for success rate, use the basic FO definition of team success (45% first down, 60% second down, 100% on remaining downs)
 gen rush_success = 1 if rush == 1 & yards>=togo
-replace rush_success = 1 if rush == 1 & yards>=.4*togo & down == 1
+replace rush_success = 1 if rush == 1 & yards>=.45*togo & down == 1
 replace rush_success = 1 if rush == 1 & yards>=.6*togo & down == 2
 replace rush_success = 0 if rush_success == .
 
@@ -99,15 +105,15 @@ replace totsuccess = totsuccess[_n-1] + rush_success if offense == offense[_n-1]
 gen success_ratio = totsuccess[_n-1] / totrush[_n-1] if playno>5
 
 //break success ratio into categories
-gen group_success_ratio = 0 if success_ratio<=.4 & playno>=10
-replace group_success_ratio = 1 if success_ratio>.4 & success_ratio<=.5 & playno>=10
-replace group_success_ratio = 2 if success_ratio>.5 & success_ratio<=.6 & playno>=10
-replace group_success_ratio = 3 if success_ratio>.6 & success_ratio<=1 & playno>=10
+gen group_success_ratio = 0 if success_ratio<=.3 & playno>=10
+replace group_success_ratio = 1 if success_ratio>.3 & success_ratio<=.4 & playno>=10
+replace group_success_ratio = 2 if success_ratio>.4 & success_ratio<=.5 & playno>=10
+replace group_success_ratio = 3 if success_ratio>.5 & success_ratio<=1 & playno>=10
 
-label def grouplbl2 0 "<40%"
-label def grouplbl2 1 "40-50%", add
-label def grouplbl2 2 "50-60%", add
-label def grouplbl2 3 "60+%", add
+label def grouplbl2 0 "<30%"
+label def grouplbl2 1 "30-40%", add
+label def grouplbl2 2 "40-50%", add
+label def grouplbl2 3 "50+%", add
 
 label values group_success_ratio grouplbl2
 
@@ -140,7 +146,7 @@ gen rush_success_last10 = l.rush_success+l2.rush_success+l3.rush_success+l4.rush
 replace pressure = 0 if pressure == .
 
 //final cleaned dataset
-save fo_2011_2016, replace
+save fo_2011_2017, replace
 
 /*
 
@@ -151,7 +157,7 @@ SEASON-LEVEL SCATTERPLOTS
 clear matrix
 clear
 set mem 1g
-use "C:\Users\ben\Dropbox\nfl\fodata\fo_2011_2016", clear
+use "C:\Users\ben\Dropbox\nfl\fodata\fo_2011_2017", clear
 
 preserve
 	//keep if gap>=-7 & gap<=7    /* for testing score within 7 points */
@@ -172,39 +178,43 @@ tostring syear, replace
 gen tm = offense+syear //for labeling some test graphs, not used in piece
 
 //basic season-long rush freq vs PA yards w label
-twoway scatter yards rush_rate, mlabel(tm) graphregion(fcolor(white))
+*twoway scatter yards rush_rate, mlabel(tm) graphregion(fcolor(white))
 
 //basic season-long rush freq vs PA yards w label, west divisions
-twoway scatter yards rush_rate if offense=="SEA" | offense=="SF" | offense=="STL" | offense=="LARM" | offense=="ARI", mlabel(tm) graphregion(fcolor(white))
-twoway scatter yards rush_rate if offense=="SD" | offense=="DEN" | offense=="KC" | offense=="OAK", mlabel(tm) graphregion(fcolor(white))
+*twoway scatter yards rush_rate if offense=="SEA" | offense=="SF" | offense=="STL" | offense=="LARM" | offense=="ARI", mlabel(tm) graphregion(fcolor(white))
+*twoway scatter yards rush_rate if offense=="SD" | offense=="DEN" | offense=="KC" | offense=="OAK", mlabel(tm) graphregion(fcolor(white))
+
+replace rush_rate = rush_rate * 100
+replace success_rate = success_rate * 100
 
 //make the graphs used in the piece
 qui reg yards rush_rate //.48 for all, .52 for close game
 local r2 = string(`e(r2)',"%9.2f")
-twoway scatter yards rush_rate, graphregion(fcolor(white)) text(5 .48 "R2 = `r2'") ytitle(Yards per play) xtitle(Proportion rushes) ///
-name(rate, replace) title(Rush ratio)
+twoway scatter yards rush_rate, graphregion(fcolor(white)) text(5 48 "R2 = `r2'") ytitle(PA yards per play) xtitle(Rush percent) ///
+name(rate, replace) title(Rush percent)
 
 qui reg yards rush //525 for all, 375 for close game
 local r2 = string(`e(r2)',"%9.2f")
-twoway scatter yards rush, graphregion(fcolor(white)) text(5 525 "R2 = `r2'") ytitle(Yards per play) xtitle(Total rushes) ///
+twoway scatter yards rush, graphregion(fcolor(white)) text(5 525 "R2 = `r2'") ytitle(PA yards per play) xtitle(Total rushes) ///
 name(total, replace) title(Rushes)
 
 qui reg yards success_rate
 local r2 = string(`e(r2)',"%9.2f")
-twoway scatter yards success_rate, graphregion(fcolor(white)) text(5 .55 "R2 = `r2'") ytitle(Yards per play) xtitle(Rushing success rate) ///
+twoway scatter yards success_rate, graphregion(fcolor(white)) text(5 49 "R2 = `r2'") ytitle(PA yards per play) xtitle(Rushing success rate (%)) ///
 name(success, replace) title(Rush success rate)
 
 window manage close graph _all
 
+
 //season-level results: graph in piece
-graph combine total rate success, cols(2) title(Play action passing vs measures of rushing) ///
+graph combine total rate success, cols(2) title(Play-action passing vs measures of rushing) ///
 graphregion(fcolor(white)) ///
-t1title("NFL, 2011-2016")
+t1title("NFL, 2011-2017")
 
 *t1title("NFL, 2011-2016")
 *t1title("NFL, 2011-2016, rushing within 7 points")
 
-graph export results/season_all.png, replace
+graph export results/fig1_season.png, replace
 *graph export results/season_close.png, replace
 
 
@@ -219,7 +229,7 @@ clear matrix
 clear
 set mem 1g
 cd "C:\Users\ben\Dropbox\nfl\fodata\"
-use "C:\Users\ben\Dropbox\nfl\fodata\fo_2011_2016", clear
+use "C:\Users\ben\Dropbox\nfl\fodata\fo_2011_2017", clear
 
 keep if pa == 1 & rush == 0
 
@@ -257,7 +267,7 @@ if "`var'" == "rush_last10" {
 	}
 	
 if "`var'" == "group_rush_ratio" {
-	local title "Rush ratio"
+	local title "Rush percent"
 	local xtitle "Ratio"
 	local xlab "xlabel(0 1 2 3, valuelabel)"
 	}
@@ -274,7 +284,7 @@ by `var': egen med = median(yards)
 by `var': egen uqt = pctile(yards), p(75)
 by `var': egen mean = mean(yards)
 
-by `var': egen mean_p = mean(pressure)
+by `var': egen mean_p = mean(pressure) if year < 2017
 by `var': egen mean_s = mean(shotgun)
 
 by `var': egen med_a = median(pyd)
@@ -316,7 +326,7 @@ if "`var'" == "group_rush_ratio" {
 	}
 	
 if "`var'" == "group_success_ratio" {
-	local xlab "xlabel(0 "<40" 1 "40-50" 2 "50-60" 3 "60+")"
+	local xlab "xlabel(0 "<30" 1 "30-40" 2 "40-50" 3 "50+")"
 	}
 	
 hist `var', freq discrete yla(, format(%5.0f) ang(h)) graphregion(fcolor(white)) fcolor(gs12) mcolor(black) ///
@@ -336,7 +346,7 @@ clear matrix
 clear
 set mem 1g
 cd "C:\Users\ben\Dropbox\nfl\fodata\"
-use "C:\Users\ben\Dropbox\nfl\fodata\fo_2011_2016", clear
+use "C:\Users\ben\Dropbox\nfl\fodata\fo_2011_2017", clear
 
 
 keep if pa == 1 | rush == 1
@@ -373,7 +383,7 @@ if "`var'" == "rush_last10" {
 	}
 	
 if "`var'" == "group_rush_ratio" {
-	local title "Rush ratio"
+	local title "Rush percent"
 	local xtitle "Ratio"
 	local xlab "xlabel(0 1 2 3, valuelabel)"
 	}
@@ -401,30 +411,31 @@ window manage close graph _all
 
 }
 
+local cols 3
 
 //the graphs that appear in the piece
 graph combine rush_last5h rush_success_last5h rush_last10h rush_success_last10h group_rush_ratioh group_success_ratioh, ycommon ///
-title("Frequency of various rushing measures") graphregion(fcolor(white)) name(combined_h, replace) l1(Frequency)
-graph export results/combined_h.png, replace
+title("Frequency of various rushing measures") graphregion(fcolor(white)) name(combined_h, replace) l1(Frequency) cols(`cols') imargin(2 2 2 2)
+graph export results/fig2_`cols'cols_freq.png, replace
 
 graph combine rush_last5pa rush_success_last5pa rush_last10pa rush_success_last10pa group_rush_ratiopa group_success_ratiopa, ycommon ///
-title("Likelihood of passing given showing handoff") graphregion(fcolor(white)) name(combined_pa, replace) l1(Pass likelihood)
-graph export results/combined_pa.png, replace
+title("Likelihood of passing given showing handoff") graphregion(fcolor(white)) name(combined_pa, replace) l1(Pass likelihood) cols(`cols') imargin(2 2 2 2)
+graph export results/fig3_`cols'cols_pafreq.png, replace
 
 graph combine rush_last5p rush_success_last5p rush_last10p rush_success_last10p group_rush_ratiop group_success_ratiop, ycommon ///
-title("Pressure rate on PA dropbacks") graphregion(fcolor(white)) name(combined_p, replace) l1(Pressure rate)
-graph export results/combined_p.png, replace
+title("Pressure rate on play-action dropbacks") graphregion(fcolor(white)) name(combined_p, replace) l1(Pressure rate) cols(`cols')  imargin(2 2 2 2)
+graph export results/fig5_`cols'cols_pressure.png, replace
 
 graph combine rush_last5s rush_success_last5s rush_last10s rush_success_last10s group_rush_ratios group_success_ratios, ycommon ///
-title("Shotgun rate on PA dropbacks") graphregion(fcolor(white)) name(combined_s, replace) l1(Shotgun rate)
-graph export results/combined_s.png, replace
+title("Shotgun rate on play-action dropbacks") graphregion(fcolor(white)) name(combined_s, replace) l1(Shotgun rate) cols(`cols')  imargin(2 2 2 2)
+graph export results/fig4_`cols'cols_shotgun.png, replace
 
 grc1leg rush_last5a rush_success_last5a rush_last10a rush_success_last10a group_rush_ratioa group_success_ratioa, ycommon ///
-title("Depth of target on PA dropbacks") graphregion(fcolor(white)) name(combined_a, replace) l1(Depth of target)
-graph export results/combined_a.png, replace
+title("Depth of target on play-action dropbacks") graphregion(fcolor(white)) name(combined_a, replace) l1(Depth of target) cols(`cols')  imargin(2 2 2 2)
+graph export results/fig6_`cols'cols_airyards.png, replace
 
 grc1leg rush_last5 rush_success_last5 rush_last10 rush_success_last10 group_rush_ratio group_success_ratio, ycommon ///
-title("Yards per PA dropback") graphregion(fcolor(white)) name(combined, replace) l1(Yards per dropback)
-graph export results/combined.png, replace
+title("Yards per play-action dropback") graphregion(fcolor(white)) name(combined, replace) l1(Yards per dropback) cols(`cols') imargin(2 2 2 2)
+graph export results/fig7_`cols'cols_ypa.png, replace
 
 window manage close graph _all
