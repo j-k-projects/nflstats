@@ -1,0 +1,115 @@
+clear
+cd "C:\Users\Ben\Dropbox\nfl\nfldata"
+
+insheet using "C:\Users\ben\Dropbox\nfl\pbp2017.csv", clear
+append using "C:\Users\ben\Dropbox\nfl\nfldata\pbp_all.dta"
+
+gen n = _n
+
+merge m:1 gameid using "C:\Users\Ben\Dropbox\nfl\nfldata\season_game_data_09_17"
+
+replace win_prob = "" if win_prob=="NA"
+destring win_prob, replace
+
+replace win_prob = win_prob * 100
+replace win_prob = round(win_prob, 1)
+
+gen hwin = homescore>awayscore
+replace hwin = .5 if homescore==awayscore
+
+gen win = 1 if posteam == hometeam & hwin == 1
+replace win = 1 if posteam == awayteam & hwin == 0
+replace win = .5 if hwin == .5
+replace win = 0 if win ==.
+
+keep win win_prob n
+
+save "C:\Users\ben\Dropbox\nfl\nfldata\pbp_0917_win.dta", replace
+
+
+
+//do the thing
+local iterations 200
+forvalues iteration=1/`iterations' {
+use "C:\Users\ben\Dropbox\nfl\nfldata\pbp_0917_win.dta", clear 
+
+//for testing only
+*gen x=uniform()
+*keep if x<.10
+
+bsample 
+	qui sum win if win_prob == 0
+	matrix w`iteration'= `r(mean)'
+	
+	forvalues i = 1 / 100 {
+	qui sum win if win_prob == `i'
+	matrix w`iteration'= w`iteration', `r(mean)'
+	}
+	
+	
+matrix w`iteration'=w`iteration''
+svmat w`iteration'
+
+keep if _n<=101
+gen est_win_prob=(_n-1)
+lpoly w`iteration' est_win_prob, gen(smoothed) at(est_win_prob) nograph bwidth(2)
+mkmat smoothed if smoothed!=.
+	if `iteration'==1 {
+	matrix result=smoothed
+	}
+	else matrix result=(result, smoothed)
+
+	display "Done with iteration `iteration' of `iterations'"
+	}
+
+matrix result=result'
+svmat result
+keep result*
+
+matrix conf_int = J(101, 2, 101)
+
+*sort each column (percentile) and saving 25th and 975th place in a matrix
+local low=round(2.5/100*`iterations')
+local high=`iterations'-`low'
+forvalues i = 1/101 {
+        sort result`i'
+        matrix conf_int[`i', 1] = result`i'[`low']
+        matrix conf_int[`i', 2] = result`i'[`high']
+}
+
+/* ********* 
+******* MAKE THE GRAPH
+********* */
+use "C:\Users\ben\Dropbox\nfl\nfldata\pbp_0917_win.dta", clear 
+	qui sum win if win_prob == 0
+	matrix w= `r(mean)'
+	
+	forvalues i = 1 / 100 {
+	qui sum win if win_prob == `i'
+	matrix w= w, `r(mean)'
+	}
+matrix w=w'
+svmat w
+
+keep if _n<=101
+gen est_win_prob=(_n-1)
+lpoly w1 est_win_prob, gen(smoothed) at(est_win_prob) nograph bwidth(2)
+
+svmat conf_int
+ren w1 actual_win_prob
+
+foreach var in actual_win_prob smoothed conf_int1 conf_int2 {
+replace `var' = `var' * 100
+}
+
+
+twoway ///
+(line smoothed est_win_prob, color(red)) ///
+(line conf_int1 est_win_prob, lpattern(dash) color(grey)) (line conf_int2 est_win_prob, lpattern(dash) color(grey)), ///
+xtitle("Estimated Win %") ytitle("Actual Win %") graphregion(fcolor(white)) ///
+legend(label(1 "Estimated win %") order(1)) ///
+title(Estimated and actual win probabilities in nflscrapR) t1title("NFL, 2009-2017, bootstrapped 95% CI")
+
+graph export "C:\Users\ben\Dropbox\nfl\nfldata\wp_bootstrap.png", replace width(3900)
+
+
