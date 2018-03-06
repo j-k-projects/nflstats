@@ -1,0 +1,294 @@
+
+cd "C:\Users\ben\Dropbox\nfl\fodata\"
+
+clear
+clear matrix
+set mem 1g
+
+//load 2009-2017 play-by-play from nflscrapr
+insheet using "C:\Users\ben\Dropbox\nfl\pbp2017.csv", clear
+append using "C:\Users\ben\Dropbox\nfl\nfldata\pbp_all.dta"
+
+//these aren't real plays
+drop if playtype == "Two Minute Warning" | playtype == "Timeout" | playtype == "Quarter End" | playtype=="QB Kneel"
+gen prev_kick = (playtype[_n-1] == "Punt" | playtype[_n-1] == "Kickoff") & gameid==gameid[_n-1]
+gen prev_play = playtype[_n-1] if gameid==gameid[_n-1]
+
+drop if down == "NA"
+
+gen n = _n
+
+foreach var in epa posteamscore defteamscore timesecs yrdline100 exppts playtimediff scorediff {
+replace `var' = "" if `var' == "NA"
+destring `var', replace
+}
+
+gen fs = strpos(desc, "False Start")
+gen delay = strpos(desc, "Delay of Game")
+gen scramble = strpos(desc, "scrambles")
+replace playtype = "" if (fs > 0 | delay >0 | playtype=="Spike" | playtype=="QB Kneel")
+
+//sacks and scrambles are pass attempts
+
+replace playtype = "Pass" if passattempt==1 | playtype=="Sack"
+replace playtype = "Pass" if scramble>0
+
+replace playtype = "Rush" if rushattempt==1
+keep if playtype == "Pass" | playtype == "Rush"
+
+gen pass = 1 if playtype == "Pass"
+replace pass = 0 if playtype == "Rush"
+
+egen unique_drive = group(gameid drive)
+
+//to fix a couple data errors
+replace playtimediff = 50 if playtimediff > 100 & playtimediff !=.
+
+so gameid n
+	by gameid: gen playno = _n
+so gameid posteam n
+	by gameid posteam: gen teamplayno = _n
+	
+so gameid n
+order n teamplayno playno
+
+tsset gameid playno
+gen drive_end = 1 if f.drive!=drive
+gen drive_begin = 1 if l.drive!=drive
+
+so gameid posteam n
+
+gen rest_plays = playno - playno[_n-1] - 1 if drive_begin==1 & gameid==gameid[_n-1] & posteam==posteam[_n-1]
+
+gen score = 1 if touchdown==1 & playtype!="No Play" & returnresult!="Touchdown"
+replace score = 1 if fieldgoalresult=="Good" & playtype!="No Play"
+
+gen td = 1 if touchdown==1 & playtype!="No Play" & returnresult!="Touchdown"
+gen fg = 1 if fieldgoalresult=="Good" & playtype!="No Play"
+
+collapse (firstnm) season teamplayno score td fg prev_play rest_plays playno qtr posteam defensiveteam gameid drive yrdline100 timesecs scorediff (mean) pass, by(unique_drive)
+
+so gameid drive
+gen drive_top = timesecs-timesecs[_n+1] if gameid==gameid[_n+1]
+replace drive_top = timesecs if gameid!=gameid[_n+1]
+gen rest_time = drive_top[_n-1] if gameid==gameid[_n-1] & teamplayno!=1
+
+//top entering drive
+so gameid posteam drive
+gen top = drive_top[_n-1] if drive==3 | drive == 4
+replace top = drive_top[_n-1] + top[_n-1] if gameid==gameid[_n-1] & posteam==posteam[_n-1] & drive>4
+
+so gameid posteam drive
+foreach var in rest_time rest_plays teamplayno top {
+replace `var' = . if qtr == 3 & qtr[_n-1] == 2
+}
+
+foreach var in score td fg {
+replace `var' = 0 if `var'==.
+}
+
+gen points = 7*td + 3*fg
+
+reg points c.yrdline100##c.yrdline100##c.yrdline100##c.yrdline100##c.yrdline100
+predict expected_points
+
+gen points_hat = points - expected_points
+
+foreach var in rest_time top {
+replace `var' = round(`var', 10)
+drop if `var'<=0
+replace `var' = `var'/60
+}
+
+//last 4 min of game
+drop if timesecs<240
+save "C:\Users\ben\Dropbox\nfl\points_per_drive", replace
+
+
+
+/* ****
+* graph and stuff
+**** */
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+
+global min 10 //drop observations with fewer than this many drives
+local d 3 //how many numbers after the decimal in the R2 in the graphs
+
+foreach var in rest_plays rest_time top teamplayno {
+
+if "`var'"=="rest_plays" {
+local xlab "Defensive rest time on recent drive (plays)"
+local xtxt 2.5
+local xtxt2 2.5
+local xtxt3 17 //for the yard line
+local xtxt4 17 //for expected points
+}
+if "`var'"=="rest_time" {
+local xlab "Defensive rest time on recent drive (mins)"
+local xtxt 1
+local xtxt2 1
+local xtxt3 8
+local xtxt4 8
+}
+if "`var'"=="top" {
+local xlab "ToP as of drive start (mins)"
+local xtxt 5
+local xtxt2 17
+local xtxt3 35
+local xtxt4 37
+}
+if "`var'"=="teamplayno" {
+local xlab "Plays run as of drive start"
+local xtxt 10
+local xtxt2 42
+local xtxt3 70
+local xtxt4 70
+}
+
+//0. show problem with not adjusting field position
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+qui reg yrdline100 c.`var'##c.`var'##c.`var'
+local r2 = string(`e(r2)',"%9.`d'f")
+collapse (mean) yrdline100 (count) sampsci = playno, by(`var')
+
+twoway (lpolyci yrdline100 `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter yrdline100 `var', mcolor(*.6)) if sampsci>=$min, name(yrd`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') text(55 `xtxt3' "R{superscript:2} = `r2'")
+
+/*
+//1. with kickoff as previous play
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+collapse (mean) points points_hat playno yrdline100 (count) sampsci = playno, by(prev_play `var')
+
+twoway (lpolyci points `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter points `var', mcolor(*.6)) if prev_play=="Kickoff" & sampsci>=$min, name(ko`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab')
+
+//2. points vs prev plays on plays starting from 20-30
+
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+keep if yrdline100>=70 & yrdline100<=80
+collapse (mean) points points_hat playno yrdline100 (count) sampsci = playno, by(`var')
+
+twoway (lpolyci points `var', ciplot(rline) blpattern(dash) ) (scatter points `var') if sampsci>=$min, name(`var'2030, replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab')
+*/
+
+//3. by regression-adjusted points
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+*3a show that the adjustment works
+collapse (mean) points points_hat expected_points (count) sampsci = playno, by(yrdline100)
+twoway (lpolyci points_hat yrdline100, ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter points_hat yrdline100, mcolor(*.6)) if yrdline100>50 & sampsci>=$min, name(points_hat, replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') 
+
+*3b points_hat by rest_plays
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+qui reg points_hat c.`var'##c.`var'##c.`var'
+local r2 = string(`e(r2)',"%9.`d'f")
+
+qui reg expected_points c.`var'##c.`var'##c.`var'
+local r2b = string(`e(r2)',"%9.`d'f")
+
+collapse (mean) points points_hat expected_points playno yrdline100 (count) sampsci = playno, by(`var')
+
+*expected points
+twoway (lpolyci expected_points `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter expected_points `var', mcolor(*.6)) if sampsci>=$min, name(ep`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') text(1.9 `xtxt4' "R{superscript:2} = `r2b'")
+
+*actual minus expected
+twoway (lpolyci points_hat `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter points_hat `var', mcolor(*.6)) if sampsci>=$min, name(pointhat`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') ysc(r(-2 2)) ylab(-2 (1) 2) text(1.5 `xtxt' "R{superscript:2} = `r2'")
+
+//on trailing 4Q drives only
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+drop if (scorediff>0 & qtr == 4)
+qui reg points_hat c.`var'##c.`var'##c.`var'
+local r2 = string(`e(r2)',"%9.`d'f")
+collapse (mean) points points_hat expected_points playno yrdline100 pass (count) sampsci = playno, by(`var')
+
+twoway (lpolyci points_hat `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter points_hat `var', mcolor(*.6)) if sampsci>=$min, name(trailpointhat`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') ysc(r(-2 2)) ylab(-2 (1) 2) text(1.5 `xtxt' "R{superscript:2} = `r2'")
+
+twoway (lpolyci pass `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter pass `var', mcolor(*.6)) if sampsci>=$min, name(trailpass`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') ysc(r(.4 1)) ylab(.4 (.1) 1)
+
+
+//on trailing 4Q drives starting from 4-10 mins
+use "C:\Users\ben\Dropbox\nfl\points_per_drive", clear
+keep if scorediff <0 & qtr == 4 & timesecs<=600
+qui reg points_hat c.`var'##c.`var'##c.`var'
+local r2 = string(`e(r2)',"%9.`d'f")
+collapse (mean) points points_hat expected_points playno yrdline100 pass (count) sampsci = playno, by(`var')
+
+twoway (lpolyci points_hat `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter points_hat `var', mcolor(*.6)) if sampsci>=$min, name(trail4q`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') ysc(r(-2 2)) ylab(-2 (1) 2) text(-1.5 `xtxt2' "R{superscript:2} = `r2'")
+
+twoway (lpolyci pass `var', ciplot(rline) blpattern(dash) lcolor(red) lwidth(thick) blcolor(gray) blwidth(medium)) ///
+(scatter pass `var', mcolor(*.6)) if sampsci>=$min, name(trail4qpass`var', replace) ///
+graphregion(fcolor(white)) legend(off) nodraw xtitle(`xlab') ysc(r(.4 1)) ylab(.4 (.1) 1)
+
+}
+
+
+//all drives, yardline
+graph combine yrdrest_plays yrdrest_time yrdteamplayno yrdtop, ycommon title("Average starting field position") ///
+graphregion(fcolor(white)) t1title("Distance from opponent end zone")
+
+graph export defrest/g1_yrd.png, replace width(3900)
+
+/*
+//drives after kickoff
+graph combine korest_plays korest_time koteamplayno kotop, ycommon title("Points per drive following kickoffs") ///
+graphregion(fcolor(white))
+
+graph export defrest/ko.png, replace width(3900)
+
+
+//drives starting from own 20-30
+graph combine rest_plays2030 rest_time2030 teamplayno2030 top2030, ycommon title("Points per drive") t1title("Drives starting from own 20-30") ///
+graphregion(fcolor(white))
+graph export defrest/2030.png, replace width(3900)
+*/
+
+//expected points given rest
+graph combine eprest_plays eprest_time epteamplayno eptop, ycommon title("Expected points per drive") ///
+graphregion(fcolor(white)) t1title("Based on starting field position")
+
+graph export defrest/g2_ep.png, replace width(3900)
+
+//actual - expected points given rest
+graph combine pointhatrest_plays pointhatrest_time pointhatteamplayno pointhattop, ycommon title("Actual minus expected points per drive") ///
+graphregion(fcolor(white)) t1title("NFL, 2009-2017")
+
+graph export defrest/g3_phat.png, replace width(3900)
+
+//actual - expected throwing out 4Q ahead
+graph combine trailpointhatrest_plays trailpointhatrest_time trailpointhatteamplayno trailpointhattop, ycommon title("Actual minus expected points per drive") ///
+graphregion(fcolor(white)) t1title("NFL, 2009-2017, excluding teams leading in 4Q")
+graph export defrest/g4_phat_trailing.png, replace width(3900)
+
+graph combine trailpassrest_plays trailpassrest_time trailpassteamplayno trailpasstop, ycommon title("Pass share") ///
+graphregion(fcolor(white)) t1title("NFL, 2009-2017, excluding teams leading in 4Q")
+graph export defrest/g5_pass_trailing.png, replace width(3900)
+
+
+////actual - expected trailing q4 5-10 mins
+graph combine trail4qrest_plays trail4qrest_time trail4qteamplayno trail4qtop, ycommon title("Actual minus expected points per drive") ///
+graphregion(fcolor(white)) t1title("NFL, 2009-2017, 4Q trailing from 4-10 mins")
+
+graph export defrest/g7_phat_4q.png, replace width(3900)
+
+graph combine trail4qpassrest_plays trail4qpassrest_time trail4qpassteamplayno trail4qpasstop, ycommon title("Pass share") ///
+graphregion(fcolor(white)) t1title("NFL, 2009-2017, 4Q trailing from 4-10 mins")
+graph export defrest/g6_pass_4q.png, replace width(3900)
+
+
+window manage close graph _all
+
+
