@@ -1,0 +1,388 @@
+clear 
+clear matrix
+set mem 1g
+
+global lastyr 7 //for 2017
+cd "C:\Users\Ben\Dropbox\nfl\nfldata"
+
+insheet using pbp_2009.csv, clear
+gen n = _n
+tempfile f09
+save `f09', replace
+forvalues i = 0 / $lastyr {
+	insheet using pbp_201`i'.csv, clear
+	gen n = _n
+	tempfile f1`i'
+	save `f1`i'', replace
+}
+
+use `f09', clear
+forvalues i = 0 / $lastyr {
+	append using `f1`i''
+}
+
+//add game results
+merge m:1 gameid using "C:\Users\Ben\Dropbox\nfl\nfldata\season_game_data_09_17"
+
+so gameid n
+
+foreach var in posteam hometeam defensiveteam awayteam {
+replace `var' = "STL" if `var'=="LA" | `var' == "LARM"
+replace `var' = "JAC" if `var'=="JAX"
+replace `var' = "SD" if `var' == "LAC"
+}
+
+foreach var in epa wpa posteamscore defteamscore timesecs yrdline100 exppts playtimediff scorediff down {
+replace `var' = "" if `var' == "NA"
+destring `var', replace
+}
+
+//these aren't real plays
+drop if playtype == "Two Minute Warning" | playtype == "Timeout" | playtype == "Quarter End" ///
+| playtype=="Half End" | playtype=="Kickoff"
+drop if  timesecs==.
+
+drop if posteam==""
+drop if down == .
+
+
+gen fs = strpos(desc, "False Start")
+gen delay = strpos(desc, "Delay of Game")
+gen nzi = strpos(desc, "Neutral Zone")
+gen penalty = strpos(desc, "PENALTY")
+replace penalty = 1 if penalty > 0
+
+drop if fs > 0 | delay > 0 | nzi > 0
+drop if playtype=="QB Kneel" | playtype=="Spike" 
+
+so n
+drop n
+gen n = _n
+
+gen mid = strpos(desc, "up the middle")
+gen rg = strpos(desc, "right guard")
+gen re = strpos(desc, "right end")
+gen rt = strpos(desc, "right tackle")
+gen lg = strpos(desc, "left guard")
+gen lt = strpos(desc, "left tackle")
+gen le = strpos(desc, "left end")
+
+gen rush = 1 if mid > 0 | rg > 0 | re > 0 | rt > 0 | lg > 0 | lt > 0 | le > 0
+
+gen scramble = strpos(desc, "scrambles")
+drop sack
+gen sack = strpos(desc, "sacked")
+
+replace rush = 0 if scramble > 0
+
+gen pass = 1 if passattempt == 1 | sack > 0 | scramble>0
+
+replace rush = 0 if rush == .
+replace pass = 0 if pass == .
+
+egen unique_drive = group(gameid drive)
+
+so unique_drive n
+by unique_drive: gen drive_n = _n
+so gameid n
+
+drop if playtype=="No Play"
+drop firstdown
+gen firstdown = yardsgained >= ydstogo
+gen points = 3 if fieldgoalresult=="Good"
+replace points = 7 if touchdown==1 & returnresult!="Touchdown"
+replace points = 0 if points == .
+gen punt = playtype=="Punt"
+
+bys unique_drive: egen drive_points = max(points)
+bys unique_drive: egen drive_punt = max(punt)
+
+gen drive_start = yrdline100 if drive_n==1
+replace drive_start = drive_start[_n-1] if drive_start==.
+
+gen drive_start_t = timesecs if drive_n==1
+replace drive_start_t = drive_start_t[_n-1] if drive_start_t==.
+
+drop if rush == 0 & pass == 0
+replace pass = 0 if rush == 1
+
+bys unique_drive: egen drive_rush = sum(rush)
+bys unique_drive: egen drive_pass = sum(pass)
+gen drive_plays = drive_rush + drive_pass
+
+drop if gameid==2011120406
+
+so gameid n
+
+gen fd_series = 1 if firstdown == 1
+
+qui sum drive_plays
+local n `r(max)'
+
+forvalues i=1/`n' {
+replace fd_series = fd_series[_n+1] if unique_drive==unique_drive[_n+1] & fd_series==.
+}
+replace fd_series = 0 if fd_series == .
+
+save pbp_rush_pass_st, replace
+
+/*
+PART 1 -- OPENING SERIES
+*/
+
+cd "C:\Users\Ben\Dropbox\nfl\nfldata"
+use pbp_rush_pass_st, clear
+
+keep if drive_start>=20 & drive_start<=90
+drop if (drive_start_t <180) | (drive_start_t > 1800 & drive_start_t < 1980) //exclude last 3 mins of both halves
+
+
+//no longer used
+/*
+forvalues n = 2/3 {
+preserve
+	keep if drive_n==`n' & down == `n'
+	collapse (mean) fd_series drive_punt drive_plays drive_points, by(ydstogo pass)
+	
+	foreach i in fd_series drive_points drive_plays drive_punt {
+	if "`i'"=="fd_series" {
+	local title "First down on series"
+	}
+	if "`i'"=="drive_points" {
+	local title "Points per drive"
+	}
+	if "`i'"=="drive_plays" {
+	local title "Plays per drive"
+	}
+	if "`i'"=="drive_punt" {
+	local title "Punts per drive"
+	}
+
+	twoway ///
+	(scatter `i' ydstogo if pass==1, mcolor(red)) (lpoly `i' ydstogo if pass==1, lcolor(red)) ///
+	(scatter `i' ydstogo if pass==0) (lpoly `i' ydstogo if pass==0) ///
+	if ydstogo<=10, graphregion(fcolor(white)) ///
+	legend(label(1 "") label(2 "Pass") label(3 "PA") label(4 "Rush") order(2 4) cols(2) region(lcolor(white))) ///
+	ytitle("") xtitle(Yards to go) title("`title'")  ///
+	name(`i', replace) nodraw scheme(s2mono)
+	}
+	
+	grc1leg fd_series drive_points drive_punt drive_plays, graphregion(fcolor(white)) cols(2) imargin(0 0 0 0) title("Decision making on play `n' of drive") ///
+	t1title("NFL, drive starting 40-90 yards from opp. end zone, 2009-2017") name(g`n', replace) scheme(s2mono)
+
+restore
+}
+
+*/
+
+label def plbl 0 "Rush"
+label def plbl 1 "Pass", add
+label values pass plbl
+
+preserve
+
+	keep if down == 1 & ydstogo==10 & yrdline100>=20 & yrdline100<=90
+
+	foreach i in fd_series drive_points drive_plays drive_punt {
+	if "`i'"=="fd_series" {
+	local title "First down on series"
+	}
+	if "`i'"=="drive_points" {
+	local title "Points per drive"
+	}
+	if "`i'"=="drive_plays" {
+	local title "Plays per drive"
+	}
+	if "`i'"=="drive_punt" {
+	local title "Punts per drive"
+	}
+
+graph bar `i', over(pass, gap(5)) graphregion(fcolor(white)) ytitle("") title("`title'") ///
+bargap(1) outergap(0) scheme(s2mono) name(`i', replace) nodraw
+}
+	graph combine fd_series drive_points drive_punt drive_plays, graphregion(fcolor(white)) cols(2) imargin(0 0 0 0) title("Decision making on 1st-and-10") ///
+	t1title("NFL, 20-90 yards from opp. end zone, 2009-2017") name(g1, replace) scheme(s2mono)
+
+restore
+
+keep if drive_n == 1
+
+gen rush_ratio = drive_rush/drive_plays
+gen one =1
+collapse (mean) rush_ratio (sum) n = one, by(drive_plays)
+
+	twoway ///
+	(scatter rush_ratio drive_plays) (lpoly rush_ratio drive_plays) ///
+	if n>20 & drive_plays>=5, graphregion(fcolor(white)) ///
+	ytitle("") xtitle(Plays in drive) ///
+	name(plays, replace) scheme(s2mono) ytitle(Rush ratio) ///
+	ysc(r(.40 .45)) ylab(.40 (.01) .45) legend(off) title(Rush ratio by drive length)
+	
+cd "C:\Users\Ben\Dropbox\nfl\nfldata\drivelength"
+
+forvalues i=1/3 {
+graph display g`i'
+graph export g`i'.png, replace width(3900)
+}
+
+graph display plays
+graph export g4.png, replace width(3900)
+
+window manage close graph _all
+*/
+
+
+
+/*
+PART 2 -- ALL PLAYS
+*/
+cd "C:\Users\Ben\Dropbox\nfl\nfldata"
+use pbp_rush_pass_st, clear
+
+drop if yrdline100<20 | yrdline100>90
+drop if (drive_start_t <180) | (drive_start_t > 1800 & drive_start_t < 1980) //exclude last 3 mins of both halves
+
+
+forvalues n = 2/3 {
+preserve
+	keep if down == `n'
+	collapse (mean) fd_series drive_punt drive_plays drive_points, by(ydstogo pass)
+		
+	foreach i in fd_series drive_points drive_plays drive_punt {
+	if "`i'"=="fd_series" {
+	local title "First down on series"
+	}
+	if "`i'"=="drive_points" {
+	local title "Points per drive"
+	}
+	if "`i'"=="drive_plays" {
+	local title "Plays per drive"
+	}
+	if "`i'"=="drive_punt" {
+	local title "Punts per drive"
+	}
+
+	twoway ///
+	(scatter `i' ydstogo if pass==1, mcolor(red)) (lpoly `i' ydstogo if pass==1, lcolor(red)) ///
+	(scatter `i' ydstogo if pass==0) (lpoly `i' ydstogo if pass==0) ///
+	if ydstogo<=10, graphregion(fcolor(white)) ///
+	legend(label(1 "") label(2 "Pass") label(3 "PA") label(4 "Rush") order(2 4) cols(2) region(lcolor(white))) ///
+	ytitle("") xtitle(Yards to go) title("`title'")  ///
+	name(`i', replace) nodraw scheme(s2mono)
+	}
+	
+	grc1leg fd_series drive_points drive_punt drive_plays, graphregion(fcolor(white)) cols(2) imargin(0 0 0 0) title("Decision making on down `n'") ///
+	t1title("NFL, 20-90 yards from opp. end zone, 2009-2017") name(g`n'_a, replace) scheme(s2mono)
+
+restore
+}
+	
+cd "C:\Users\Ben\Dropbox\nfl\nfldata\drivelength"
+
+forvalues i=2/3 {
+graph display g`i'_a
+graph export g`i'_a.png, replace width(3900)
+}
+
+/*
+part 3: 1st downs: rush vs pass by field position
+*/
+cd "C:\Users\Ben\Dropbox\nfl\nfldata"
+use pbp_rush_pass_st, clear
+
+drop if (drive_start_t <180) | (drive_start_t > 1800 & drive_start_t < 1980) //exclude last 3 mins of both halves
+keep if down == 1 & ydstogo==10
+
+	collapse (mean) fd_series drive_punt drive_plays drive_points, by(yrdline100 pass)
+		
+	foreach i in fd_series drive_points drive_plays drive_punt {
+	if "`i'"=="fd_series" {
+	local title "First down on series"
+	}
+	if "`i'"=="drive_points" {
+	local title "Points per drive"
+	}
+	if "`i'"=="drive_plays" {
+	local title "Plays per drive"
+	}
+	if "`i'"=="drive_punt" {
+	local title "Punts per drive"
+	}
+
+	twoway ///
+	(scatter `i' yrdline100 if pass==1, mcolor(red) msize(vsmall)) (lpoly `i' yrdline100 if pass==1, lcolor(red)) ///
+	(scatter `i' yrdline100 if pass==0, msize(vsmall)) (lpoly `i' yrdline100 if pass==0) ///
+	if yrdline100>=20, graphregion(fcolor(white)) ///
+	legend(label(1 "") label(2 "Pass") label(3 "") label(4 "Rush") order(2 4) cols(2) region(lcolor(white))) ///
+	ytitle("") xtitle(Distance from opp end zone) title("`title'")  ///
+	name(`i', replace) nodraw scheme(s2mono)
+	}
+	
+	grc1leg fd_series drive_points drive_punt drive_plays, graphregion(fcolor(white)) cols(2) imargin(1 1 1 1) title("Decision making on 1st-and-10") ///
+	t1title("NFL, 2009-2017") name(g5, replace) scheme(s2mono)
+
+	graph export "C:\Users\Ben\Dropbox\nfl\nfldata\drivelength\g0.png", replace width(3900)
+
+window manage close graph _all
+
+
+/*
+PART 4 -- normal vs short yardage by team-season
+*/
+cd "C:\Users\Ben\Dropbox\nfl\nfldata"
+use pbp_rush_pass_st, clear
+drop if (drive_start_t <180) | (drive_start_t > 1800 & drive_start_t < 1980) //exclude last 3 mins of both halves
+*drop if qtr == 4
+keep if rush == 1
+*gen success = epa > 0
+
+gen success = 1 if yardsgained>=ydstogo
+replace success = 1 if yardsgained>=.45*ydstogo & down == 1
+replace success = 1 if yardsgained>=.6*ydstogo & down == 2
+replace success = 0 if success == .
+
+preserve
+	drop if ydstogo<=3
+	collapse (mean) success, by(posteam season)
+	ren success success_long
+	tempfile long
+	save `long', replace
+restore
+
+
+keep if ydstogo<=3
+collapse (mean) success, by(posteam season)
+ren success success_short
+
+merge 1:1 posteam season using `long', nogen
+
+gsort season -success_short
+by season: gen rank_short = _n
+
+gsort season -success_long
+by season: gen rank_long = _n
+
+spearman rank*
+
+
+
+/*
+PART 5 -- get frequencies of situations
+*/
+cd "C:\Users\Ben\Dropbox\nfl\nfldata"
+use pbp_rush_pass_st, clear
+
+gen short = down == 2 & ydstogo<=3
+replace short = 1 if down == 3 & ydstogo<=6
+replace short = 1 if down == 4 & ydstogo<=6
+
+sum short
+
+gen short_r = short == 1 & rush == 1
+sum short_r
+
+gen vshort = (down == 3 & ydstogo<=3) | (down == 4 & ydstogo<=3)
+sum vshort
+
+gen vshort_r = vshort==1 & rush==1
+sum vshort_r
