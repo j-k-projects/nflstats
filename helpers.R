@@ -118,7 +118,7 @@ fix_pbp <- function(pbp) {
       passer_player_name = ifelse(play_type == "no_play" & pass == 1, 
                                   str_extract(desc, "(?<=\\s)[A-Z][a-z]*\\.\\s?[A-Z][A-z]+(\\s(I{2,3})|(IV))?(?=\\s((pass)|(sack)|(scramble)))"),
                                   passer_player_name),
-      receiver_player_name = ifelse(play_type == "no_play" & str_detect(desc, "pass"), 
+      receiver_player_name = ifelse(play_type == "no_play" & str_detect(desc, " pass"), 
                                     str_extract(desc, 
                                                 "(?<=to\\s)[A-Z][a-z]*\\.\\s?[A-Z][A-z]+(\\s(I{2,3})|(IV))?"),
                                     receiver_player_name),
@@ -127,6 +127,7 @@ fix_pbp <- function(pbp) {
                                   rusher_player_name),
       name = ifelse(!is_na(passer_player_name), passer_player_name, rusher_player_name),
       name = ifelse(name=="G.Minshew II", "G.Minshew", name),
+      receiver_player_name = ifelse(receiver_player_name=="D.Chark Jr.", "D.Chark", receiver_player_name),
       yards_gained=ifelse(play_type=="no_play",NA,yards_gained),
       play=1,season=year, incomplete_pass=if_else(interception==1, 1, incomplete_pass)
     ) %>%
