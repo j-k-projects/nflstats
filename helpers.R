@@ -9,7 +9,8 @@ library(teamcolors)
 #functions
 
 #scrape
-#note plays_filename defined outside this function
+#note plays_filename defined outside this function. need to define it somewhere
+#y = season you want
 scrape <- function(y) {
   
   report("Loading game data")
